@@ -4,15 +4,16 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lonng/nano/cluster"
-	"github.com/lonng/nano/component"
-	"github.com/lonng/nano/internal/env"
-	"github.com/lonng/nano/internal/log"
-	"github.com/lonng/nano/internal/message"
-	"github.com/lonng/nano/pipeline"
-	"github.com/lonng/nano/serialize"
-	"github.com/lonng/nano/service"
 	"google.golang.org/grpc"
+
+	"gnano/cluster"
+	"gnano/component"
+	"gnano/internal/env"
+	"gnano/internal/log"
+	"gnano/internal/message"
+	"gnano/pipeline"
+	"gnano/serialize"
+	"gnano/service"
 )
 
 type Option func(*cluster.Options)
@@ -90,6 +91,23 @@ func WithDebugMode() Option {
 	return func(_ *cluster.Options) {
 		env.Debug = true
 	}
+}
+
+func WithDebug(debug bool) Option {
+	return func(_ *cluster.Options) {
+		env.Debug = debug
+	}
+}
+
+// 切换模式
+func WithMode(mode uint32) Option {
+	return func(_ *cluster.Options) {
+		env.Mode = env.ModeType(mode)
+	}
+}
+
+func Mode() uint32 {
+	return uint32(env.Mode)
 }
 
 // SetDictionary sets routes map
@@ -172,5 +190,29 @@ func WithNodeId(nodeId uint64) Option {
 func WithUnregisterCallback(fn func(member cluster.Member)) Option {
 	return func(opt *cluster.Options) {
 		opt.UnregisterCallback = fn
+	}
+}
+
+func WithConnArrayMaxSize(maxSize uint) Option {
+	return func(_ *cluster.Options) {
+		env.ConnArrayMaxSize = maxSize
+	}
+}
+
+func WithMethodDesc(gm *grpc.MethodDesc) Option {
+	return func(opt *cluster.Options) {
+		opt.MethodDescExpand = gm
+	}
+}
+
+func WithSignalReload(reload func()) Option {
+	return func(_ *cluster.Options) {
+		env.SignalReload = reload
+	}
+}
+
+func WithSignalQuit(quit func()) Option {
+	return func(_ *cluster.Options) {
+		env.SignalQuit = quit
 	}
 }

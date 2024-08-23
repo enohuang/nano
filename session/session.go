@@ -27,18 +27,32 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lonng/nano/service"
+	"gnano/pkg"
+	"gnano/service"
+)
+
+type CloseType int
+
+var (
+	// 同账号重复登陆
+	RepeatLogin CloseType = 1
+	// 维护模式踢出
+	RepairKick CloseType = 2
 )
 
 // NetworkEntity represent low-level network instance
 type NetworkEntity interface {
 	Push(route string, v interface{}) error
-	RPC(route string, v interface{}) error
+	RPC(route string, v interface{}, sds ...pkg.SessionData) error
 	LastMid() uint64
 	Response(v interface{}) error
 	ResponseMid(mid uint64, v interface{}) error
 	Close() error
+	CloseHandler(ct CloseType) error
+	Kick(int32, ...int64) error
 	RemoteAddr() net.Addr
+	ID() int64
+	RpcClientAddr() string
 }
 
 var (
@@ -72,6 +86,17 @@ func New(entity NetworkEntity) *Session {
 	}
 }
 
+func NewBindUid(entity NetworkEntity, uid int64) *Session {
+	return &Session{
+		id:       service.Connections.SessionID(),
+		uid:      int64(uid),
+		entity:   entity,
+		data:     make(map[string]interface{}),
+		lastTime: time.Now().Unix(),
+		router:   newRouter(),
+	}
+}
+
 // NetworkEntity returns the low-level network agent object
 func (s *Session) NetworkEntity() NetworkEntity {
 	return s.entity
@@ -83,8 +108,8 @@ func (s *Session) Router() *Router {
 }
 
 // RPC sends message to remote server
-func (s *Session) RPC(route string, v interface{}) error {
-	return s.entity.RPC(route, v)
+func (s *Session) RPC(route string, v interface{}, sds ...pkg.SessionData) error {
+	return s.entity.RPC(route, v, sds...)
 }
 
 // Push message to client
@@ -101,6 +126,11 @@ func (s *Session) Response(v interface{}) error {
 // request message ID
 func (s *Session) ResponseMID(mid uint64, v interface{}) error {
 	return s.entity.ResponseMid(mid, v)
+}
+
+// Kick message to client
+func (s *Session) Kick(kt int32, uIds ...int64) error {
+	return s.entity.Kick(kt, uIds...)
 }
 
 // ID returns the session id
@@ -133,6 +163,9 @@ func (s *Session) Bind(uid int64) error {
 func (s *Session) Close() {
 	s.entity.Close()
 }
+func (s *Session) CloseHandler(ct CloseType) {
+	s.entity.CloseHandler(ct)
+}
 
 // RemoteAddr returns the remote network address.
 func (s *Session) RemoteAddr() net.Addr {
@@ -159,9 +192,18 @@ func (s *Session) Set(key string, value interface{}) {
 func (s *Session) HasKey(key string) bool {
 	s.RLock()
 	defer s.RUnlock()
-
 	_, has := s.data[key]
 	return has
+}
+
+func (s *Session) HasKeyNotNil(key string) (interface{}, bool) {
+	s.RLock()
+	defer s.RUnlock()
+	v, has := s.data[key]
+	if has && v == nil {
+		return nil, false
+	}
+	return v, has
 }
 
 // Int returns the value associated with the key as a int.
@@ -415,5 +457,12 @@ func (s *Session) Clear() {
 	defer s.Unlock()
 
 	s.uid = 0
+	s.data = map[string]interface{}{}
+}
+
+// 移除所有key
+func (s *Session) RemoveAll() {
+	s.Lock()
+	defer s.Unlock()
 	s.data = map[string]interface{}{}
 }

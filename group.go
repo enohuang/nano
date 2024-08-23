@@ -25,10 +25,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/lonng/nano/internal/env"
-	"github.com/lonng/nano/internal/log"
-	"github.com/lonng/nano/internal/message"
-	"github.com/lonng/nano/session"
+	"gnano/internal/env"
+	"gnano/internal/log"
+	"gnano/internal/message"
+	"gnano/session"
 )
 
 const (
@@ -56,20 +56,6 @@ func NewGroup(n string) *Group {
 		name:     n,
 		sessions: make(map[int64]*session.Session),
 	}
-}
-
-// FindMember Find a member with customer filter
-func (c *Group) FindMember(filter func(ses *session.Session) bool) (*session.Session, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	for _, s := range c.sessions {
-		if filter(s) {
-			return s, nil
-		}
-	}
-
-	return nil, ErrMemberNotFound
 }
 
 // Member returns specified UID's session
@@ -129,6 +115,7 @@ func (c *Group) Multicast(route string, v interface{}, filter SessionFilter) err
 	return nil
 }
 
+// 可以进行忽略或采用warn 打印
 // Broadcast push  the message(s) to  all members
 func (c *Group) Broadcast(route string, v interface{}) error {
 	if c.isClosed() {
@@ -202,6 +189,25 @@ func (c *Group) Leave(s *session.Session) error {
 	return nil
 }
 
+func (c *Group) Kick(kt int32, check func(s *session.Session) bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.isClosed() {
+		return ErrClosedGroup
+	}
+	for _, s := range c.sessions {
+		if check(s) {
+			err := s.Kick(kt, s.UID())
+			if err != nil {
+				return err
+			}
+			delete(c.sessions, s.ID())
+		}
+	}
+	return nil
+}
+
 // LeaveAll clear all sessions in the group
 func (c *Group) LeaveAll() error {
 	if c.isClosed() {
@@ -210,7 +216,6 @@ func (c *Group) LeaveAll() error {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
 	c.sessions = make(map[int64]*session.Session)
 	return nil
 }
@@ -224,10 +229,7 @@ func (c *Group) Count() int {
 }
 
 func (c *Group) isClosed() bool {
-	if atomic.LoadInt32(&c.status) == groupStatusClosed {
-		return true
-	}
-	return false
+	return atomic.LoadInt32(&c.status) == groupStatusClosed
 }
 
 // Close destroy group, which will release all resource in the group

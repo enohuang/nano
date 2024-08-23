@@ -33,12 +33,13 @@ type Connection interface {
 	SessionID() int64
 }
 
+// 多网关部署时 需要重新设置这个值 nano.WithNodeId()
 func ResetNodeId(nodeId uint64) {
 	Connections = newDefaultConnectionServer(nodeId)
 }
 
 // Connections is a global variable which is used by session.
-//var Connections  = newConnectionService()
+// var Connections  = newConnectionService()
 var Connections Connection = newDefaultConnectionServer(uint64(os.Getpid()))
 
 type connectionService struct {

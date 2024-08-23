@@ -44,6 +44,12 @@ const (
 
 	// Kick represents a kick off packet
 	Kick = 0x05 // disconnect message from server
+
+	// Repeat login
+	RepeatLogin = 0x06
+
+	// 维护模式
+	RepairKick = 0x07
 )
 
 // ErrWrongPacketType represents a wrong packet type.
@@ -56,12 +62,12 @@ type Packet struct {
 	Data   []byte
 }
 
-//New create a Packet instance.
+// New create a Packet instance.
 func New() *Packet {
 	return &Packet{}
 }
 
-//String represents the Packet's in text mode.
+// String represents the Packet's in text mode.
 func (p *Packet) String() string {
 	return fmt.Sprintf("Type: %d, Length: %d, Data: %s", p.Type, p.Length, string(p.Data))
 }

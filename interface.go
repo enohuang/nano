@@ -30,12 +30,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lonng/nano/cluster"
-	"github.com/lonng/nano/component"
-	"github.com/lonng/nano/internal/env"
-	"github.com/lonng/nano/internal/log"
-	"github.com/lonng/nano/internal/runtime"
-	"github.com/lonng/nano/scheduler"
+	"gnano/cluster"
+	"gnano/component"
+	"gnano/internal/env"
+	"gnano/internal/log"
+	"gnano/internal/runtime"
+	"gnano/scheduler"
 )
 
 var running int32
@@ -108,14 +108,32 @@ func Listen(addr string, opts ...Option) {
 	}
 
 	go scheduler.Sched()
-	sg := make(chan os.Signal)
-	signal.Notify(sg, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGTERM)
+	sg := make(chan os.Signal, 1)
+	signal.Notify(sg, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGTERM, syscall.SIGHUP)
 
-	select {
-	case <-env.Die:
-		log.Println("The app will shutdown in a few seconds")
-	case s := <-sg:
-		log.Println("Nano server got signal", s)
+	isBreak := false
+	for {
+		select {
+		case <-env.Die:
+			log.Println("The app will shutdown in a few seconds")
+			isBreak = true
+		case s := <-sg:
+			log.Println("Nano server got signal", s)
+			switch s {
+			case syscall.SIGHUP:
+				//触发重载信号
+				log.Println("Nano server reload")
+				env.SignalReload()
+			default:
+				//触发退出信号
+				log.Println("Nano server quit")
+				env.SignalQuit()
+				isBreak = true
+			}
+		}
+		if isBreak {
+			break
+		}
 	}
 
 	log.Println("Nano server is stopping...")
@@ -129,4 +147,11 @@ func Listen(addr string, opts ...Option) {
 // Shutdown send a signal to let 'nano' shutdown itself.
 func Shutdown() {
 	close(env.Die)
+}
+
+func Reload(opts ...Option) {
+	opt := runtime.CurrentNode.Options
+	for _, option := range opts {
+		option(&opt)
+	}
 }

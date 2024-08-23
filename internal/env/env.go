@@ -26,19 +26,32 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lonng/nano/serialize"
-	"github.com/lonng/nano/serialize/protobuf"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	"gnano/serialize"
+	"gnano/serialize/protobuf"
+)
+
+type ModeType uint32
+
+const (
+	NormalMode      ModeType = 0
+	MaintenanceMode ModeType = 1
+	DebugMode       ModeType = 2
 )
 
 var (
-	Wd                 string                   // working path
-	Die                chan bool                // wait for end application
-	Heartbeat          time.Duration            // Heartbeat internal
-	CheckOrigin        func(*http.Request) bool // check origin when websocket enabled
-	Debug              bool                     // enable Debug
-	WSPath             string                   // WebSocket path(eg: ws://127.0.0.1/WSPath)
-	HandshakeValidator func([]byte) error       // When you need to verify the custom data of the handshake request
+	Wd          string                   // working path
+	Die         chan bool                // wait for end application
+	Heartbeat   time.Duration            // Heartbeat internal
+	CheckOrigin func(*http.Request) bool // check origin when websocket enabled
+	Debug       bool                     // enable Debug
+	// 0   正常模式  1 维护模式  2 调试模式
+	Mode ModeType
+
+	WSPath             string             // WebSocket path(eg: ws://127.0.0.1/WSPath)
+	HandshakeValidator func([]byte) error // When you need to verify the custom data of the handshake request
 
 	// timerPrecision indicates the precision of timer, default is time.Second
 	TimerPrecision = time.Second
@@ -49,14 +62,25 @@ var (
 
 	Serializer serialize.Serializer
 
-	GrpcOptions = []grpc.DialOption{grpc.WithInsecure()}
+	// conn count configurable
+	ConnArrayMaxSize uint
+
+	// GrpcOptions = []grpc.DialOption{grpc.WithInsecure()}
+	GrpcOptions = []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+
+	SignalReload func()
+	SignalQuit   func()
 )
 
 func init() {
 	Die = make(chan bool)
-	Heartbeat = 30 * time.Second
+	Heartbeat = 10 * time.Second
+	ConnArrayMaxSize = 20
 	Debug = false
+	Mode = 0
 	CheckOrigin = func(_ *http.Request) bool { return true }
 	HandshakeValidator = func(_ []byte) error { return nil }
 	Serializer = protobuf.NewSerializer()
+	SignalQuit = func() {}
+	SignalReload = func() {}
 }

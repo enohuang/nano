@@ -33,25 +33,30 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/lonng/nano/cluster/clusterpb"
-	"github.com/lonng/nano/component"
-	"github.com/lonng/nano/internal/codec"
-	"github.com/lonng/nano/internal/env"
-	"github.com/lonng/nano/internal/log"
-	"github.com/lonng/nano/internal/message"
-	"github.com/lonng/nano/internal/packet"
-	"github.com/lonng/nano/pipeline"
-	"github.com/lonng/nano/scheduler"
-	"github.com/lonng/nano/session"
+
+	"gnano/cluster/clusterpb"
+	"gnano/component"
+	"gnano/internal/codec"
+	"gnano/internal/env"
+	"gnano/internal/log"
+	"gnano/internal/message"
+	"gnano/internal/packet"
+	"gnano/pipeline"
+	"gnano/pkg"
+	"gnano/scheduler"
+	"gnano/session"
 )
 
 var (
 	// cached serialized data
-	hrd []byte // handshake response data
-	hbd []byte // heartbeat packet data
+	hrd         []byte // handshake response data
+	hbd         []byte // heartbeat packet data
+	kick        []byte // kick packet data
+	repeatLogin []byte
+	repairKick  []byte
 )
 
-type rpcHandler func(session *session.Session, msg *message.Message, noCopy bool)
+type rpcHandler func(session *session.Session, msg *message.Message, noCopy bool, sds ...pkg.SessionData) error
 
 // CustomerRemoteServiceRoute customer remote service route
 type CustomerRemoteServiceRoute func(service string, session *session.Session, members []*clusterpb.MemberInfo) *clusterpb.MemberInfo
@@ -74,12 +79,14 @@ func cache() {
 			},
 		}
 	}
+	// s := &systempb.System{Heartbeat: env.Heartbeat.Seconds(), Servertime: time.Now().UTC().Unix()}
 	// data, err := json.Marshal(map[string]interface{}{
 	// 	"code": 200,
 	// 	"sys": map[string]float64{
 	// 		"heartbeat": env.Heartbeat.Seconds(),
 	// 	},
 	// })
+	// protobuf.NewSerializer().Marshal(&systempb.HandshakeResponse{Sys: s})
 	data, err := json.Marshal(hrdata)
 	if err != nil {
 		panic(err)
@@ -89,8 +96,22 @@ func cache() {
 	if err != nil {
 		panic(err)
 	}
-
 	hbd, err = codec.Encode(packet.Heartbeat, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	kick, err = codec.Encode(packet.Kick, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	repeatLogin, err = codec.Encode(packet.RepeatLogin, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	repairKick, err = codec.Encode(packet.RepairKick, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -149,9 +170,17 @@ func (h *LocalHandler) initRemoteService(members []*clusterpb.MemberInfo) {
 func (h *LocalHandler) addRemoteService(member *clusterpb.MemberInfo) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-
 	for _, s := range member.Services {
-		log.Println("Register remote service", s)
+		log.Println("Register remote service ", s)
+		log.Println("member", member.String())
+		for i := 0; i < len(h.remoteServices[s]); i++ {
+			// 当前存在相同服务地址的成员时 进行服务地址成员替换 更新成员的服务
+			if h.remoteServices[s][i].GetServiceAddr() == member.ServiceAddr {
+				h.remoteServices[s][i] = member
+				return
+			}
+		}
+		//  没有相同地址的则进行新增
 		h.remoteServices[s] = append(h.remoteServices[s], member)
 	}
 }
@@ -163,11 +192,13 @@ func (h *LocalHandler) delMember(addr string) {
 	for name, members := range h.remoteServices {
 		for i, maddr := range members {
 			if addr == maddr.ServiceAddr {
+				log.Println("delMember member  ", members[i].String())
 				if i >= len(members)-1 {
 					members = members[:i]
 				} else {
 					members = append(members[:i], members[i+1:]...)
 				}
+
 			}
 		}
 		if len(members) == 0 {
@@ -215,6 +246,7 @@ func (h *LocalHandler) handle(conn net.Conn) {
 	defer func() {
 		request := &clusterpb.SessionClosedRequest{
 			SessionId: agent.session.ID(),
+			UId:       agent.session.UID(),
 		}
 
 		members := h.currentNode.cluster.remoteAddrs()
@@ -312,6 +344,7 @@ func (h *LocalHandler) processPacket(agent *agent, p *packet.Packet) error {
 
 	case packet.Heartbeat:
 		// expected
+		// 只更新时间
 	}
 
 	agent.lastAt = time.Now().Unix()
@@ -324,18 +357,22 @@ func (h *LocalHandler) findMembers(service string) []*clusterpb.MemberInfo {
 	return h.remoteServices[service]
 }
 
-func (h *LocalHandler) remoteProcess(session *session.Session, msg *message.Message, noCopy bool) {
+func (h *LocalHandler) remoteProcess(session *session.Session, msg *message.Message, noCopy bool, sds ...pkg.SessionData) error {
+	var err error
+	// TODO ------  将中间这部分逻辑提供出去  作为通过服务名查找RPC Client 对象的函数
 	index := strings.LastIndex(msg.Route, ".")
 	if index < 0 {
+		err = fmt.Errorf(fmt.Sprintf("nano/handler: invalid route %s", msg.Route))
 		log.Println(fmt.Sprintf("nano/handler: invalid route %s", msg.Route))
-		return
+		return err
 	}
 
 	service := msg.Route[:index]
 	members := h.findMembers(service)
 	if len(members) == 0 {
-		log.Println(fmt.Sprintf("nano/handler: %s not found(forgot registered?)", msg.Route))
-		return
+		err = fmt.Errorf(fmt.Sprintf("nano/handler: %s not found(forgot registered?)", msg.Route))
+		log.Println(err.Error())
+		return err
 	}
 
 	// Select a remote service address
@@ -349,8 +386,9 @@ func (h *LocalHandler) remoteProcess(session *session.Session, msg *message.Mess
 		} else {
 			member := h.currentNode.Options.RemoteServiceRoute(service, session, members)
 			if member == nil {
-				log.Println(fmt.Sprintf("customize remoteServiceRoute handler: %s is not found", msg.Route))
-				return
+				err = fmt.Errorf(fmt.Sprintf("customize remoteServiceRoute handler: %s is not found", msg.Route))
+				log.Println(err.Error())
+				return err
 			}
 			remoteAddr = member.ServiceAddr
 			session.Router().Bind(service, remoteAddr)
@@ -363,11 +401,13 @@ func (h *LocalHandler) remoteProcess(session *session.Session, msg *message.Mess
 			session.Router().Bind(service, remoteAddr)
 		}
 	}
+
 	pool, err := h.currentNode.rpcClient.getConnPool(remoteAddr)
 	if err != nil {
-		log.Println(err)
-		return
+		log.Println(err.Error())
+		return err
 	}
+
 	var data = msg.Data
 	if !noCopy && len(msg.Data) > 0 {
 		data = make([]byte, len(msg.Data))
@@ -389,23 +429,44 @@ func (h *LocalHandler) remoteProcess(session *session.Session, msg *message.Mess
 		request := &clusterpb.RequestMessage{
 			GateAddr:  gateAddr,
 			SessionId: sessionId,
+			UId:       session.UID(),
 			Id:        msg.ID,
 			Route:     msg.Route,
 			Data:      data,
 		}
-		_, err = client.HandleRequest(context.Background(), request)
+		ctx, _ := context.WithTimeout(context.Background(), time.Second*12)
+		_, err = client.HandleRequest(ctx, request)
 	case message.Notify:
 		request := &clusterpb.NotifyMessage{
 			GateAddr:  gateAddr,
 			SessionId: sessionId,
 			Route:     msg.Route,
+			UId:       session.UID(),
 			Data:      data,
 		}
-		_, err = client.HandleNotify(context.Background(), request)
+		ctx, _ := context.WithTimeout(context.Background(), time.Second*9)
+		_, err = client.HandleNotify(ctx, request)
+		// 新增RPC 消息类型
+	case message.RPC:
+		request := &clusterpb.RPCMessage{
+			GateAddr:  gateAddr,
+			SessionId: sessionId,
+			Sessions:  make(map[int64]string),
+			Route:     msg.Route,
+			UId:       session.UID(),
+			Data:      data,
+		}
+		for i := 0; i < len(sds); i++ {
+			request.Sessions[sds[i].SessionId] = sds[i].Addr
+		}
+		ctx, _ := context.WithTimeout(context.Background(), time.Second*9)
+		_, err = client.HandleRPC(ctx, request)
 	}
+
 	if err != nil {
 		log.Println(fmt.Sprintf("Process remote message (%d:%s) error: %+v", msg.ID, msg.Route, err))
 	}
+	return err
 }
 
 func (h *LocalHandler) processMessage(agent *agent, msg *message.Message) {
@@ -424,12 +485,12 @@ func (h *LocalHandler) processMessage(agent *agent, msg *message.Message) {
 	if !found {
 		h.remoteProcess(agent.session, msg, false)
 	} else {
-		h.localProcess(handler, lastMid, agent.session, msg)
+		h.localProcess(handler, lastMid, agent.session, msg, nil)
 	}
 }
 
-func (h *LocalHandler) handleWS(conn *websocket.Conn) {
-	c, err := newWSConn(conn)
+func (h *LocalHandler) handleWS(conn *websocket.Conn, remote string) {
+	c, err := newWSConn(conn, remote)
 	if err != nil {
 		log.Println(err)
 		return
@@ -437,7 +498,7 @@ func (h *LocalHandler) handleWS(conn *websocket.Conn) {
 	go h.handle(c)
 }
 
-func (h *LocalHandler) localProcess(handler *component.Handler, lastMid uint64, session *session.Session, msg *message.Message) {
+func (h *LocalHandler) localProcess(handler *component.Handler, lastMid uint64, session *session.Session, msg *message.Message, sessions ...*session.Session) {
 	if pipe := h.pipeline; pipe != nil {
 		err := pipe.Inbound().Process(session, msg)
 		if err != nil {
@@ -458,12 +519,15 @@ func (h *LocalHandler) localProcess(handler *component.Handler, lastMid uint64, 
 			return
 		}
 	}
-
 	if env.Debug {
-		log.Println(fmt.Sprintf("UID=%d, Message={%s}, Data=%+v", session.UID(), msg.String(), data))
+		log.Println(fmt.Sprintf("UID=%d, Message={%s}, MID=%d, Data=%+v", session.UID(), msg.String(), lastMid, data))
+	}
+	args := []reflect.Value{handler.Receiver, reflect.ValueOf(session), reflect.ValueOf(data)}
+	//第一个参数是切片则进行切片反射对象生成
+	if handler.Method.Type.In(1) == component.TypeOfSessions {
+		args = []reflect.Value{handler.Receiver, reflect.ValueOf(sessions), reflect.ValueOf(data)}
 	}
 
-	args := []reflect.Value{handler.Receiver, reflect.ValueOf(session), reflect.ValueOf(data)}
 	task := func() {
 		switch v := session.NetworkEntity().(type) {
 		case *agent:
@@ -471,7 +535,6 @@ func (h *LocalHandler) localProcess(handler *component.Handler, lastMid uint64, 
 		case *acceptor:
 			v.lastMid = lastMid
 		}
-
 		result := handler.Method.Func.Call(args)
 		if len(result) > 0 {
 			if err := result[0].Interface(); err != nil {
@@ -479,28 +542,41 @@ func (h *LocalHandler) localProcess(handler *component.Handler, lastMid uint64, 
 			}
 		}
 	}
-
 	index := strings.LastIndex(msg.Route, ".")
 	if index < 0 {
 		log.Println(fmt.Sprintf("nano/handler: invalid route %s", msg.Route))
 		return
 	}
-
 	// A message can be dispatch to global thread or a user customized thread
 	service := msg.Route[:index]
+	//获取指定的本地service  找到并且有为当前service设置过SchedName的
+	// TODO 需要再判断一下
 	if s, found := h.localServices[service]; found && s.SchedName != "" {
+		//取出会话对象中绑定的房间对象中消息队列 进行当前消息队列的操作
 		sched := session.Value(s.SchedName)
 		if sched == nil {
-			log.Println(fmt.Sprintf("nanl/handler: cannot found `schedular.LocalScheduler` by %s", s.SchedName))
+			// 放置全局消息队列中进行执行
+			scheduler.PushTask(task)
+			log.Println(fmt.Sprintf("nano/handler: cannot found `schedular.LocalScheduler` by %s", s.SchedName))
 			return
 		}
 
 		local, ok := sched.(scheduler.LocalScheduler)
 		if !ok {
-			log.Println(fmt.Sprintf("nanl/handler: Type %T does not implement the `schedular.LocalScheduler` interface",
+			log.Println(fmt.Sprintf("nano/handler: Type %T does not implement the `schedular.LocalScheduler` interface",
 				sched))
 			return
 		}
+
+		// 在RPC 接口调用时并且任务队列关闭时会触发当前解绑操作 保证游戏流程能正常进行下去 一般只有一局
+		// if local.IsClose() && strings.Contains(msg.Route[index:], "RPC") {
+		// 	log.Println(fmt.Sprintf("nano/handler: removes the closed localscheduler from the session  %s", sched))
+		// 	//将会话中的session 解绑
+		// 	session.Remove(s.SchedName)
+		// 	scheduler.PushTask(task)
+		// 	return
+		// }
+
 		local.Schedule(task)
 	} else {
 		scheduler.PushTask(task)

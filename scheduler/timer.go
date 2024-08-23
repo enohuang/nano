@@ -22,12 +22,13 @@ package scheduler
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"gnano/internal/log"
 )
 
 const (
@@ -172,7 +173,7 @@ func NewTimer(interval time.Duration, fn TimerFunc) *Timer {
 // Stop the timer to release associated resources.
 func NewCountTimer(interval time.Duration, count int, fn TimerFunc) *Timer {
 	if fn == nil {
-		panic("nano/timer: nil timer function")
+		panic("gnano/timer: nil timer function")
 	}
 	if interval <= 0 {
 		panic("non-positive interval for NewTimer")
@@ -207,7 +208,7 @@ func NewAfterTimer(duration time.Duration, fn TimerFunc) *Timer {
 // Stop the timer to release associated resources.
 func NewCondTimer(condition TimerCondition, fn TimerFunc) *Timer {
 	if condition == nil {
-		panic("nano/timer: nil condition")
+		panic("gnano/timer: nil condition")
 	}
 
 	t := NewCountTimer(time.Duration(math.MaxInt64), infinite, fn)

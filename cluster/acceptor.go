@@ -4,10 +4,11 @@ import (
 	"context"
 	"net"
 
-	"github.com/lonng/nano/cluster/clusterpb"
-	"github.com/lonng/nano/internal/message"
-	"github.com/lonng/nano/mock"
-	"github.com/lonng/nano/session"
+	"gnano/cluster/clusterpb"
+	"gnano/internal/message"
+	"gnano/mock"
+	"gnano/pkg"
+	"gnano/session"
 )
 
 type acceptor struct {
@@ -35,20 +36,19 @@ func (a *acceptor) Push(route string, v interface{}) error {
 	return err
 }
 
-// RPC implements the session.NetworkEntity interface
-func (a *acceptor) RPC(route string, v interface{}) error {
+// 新增一个RPC 消息类型 用于服务跟服务之间的远程通讯 传递数据
+func (a *acceptor) RPC(route string, v interface{}, sds ...pkg.SessionData) error {
 	// TODO: buffer
 	data, err := message.Serialize(v)
 	if err != nil {
 		return err
 	}
 	msg := &message.Message{
-		Type:  message.Notify,
+		Type:  message.RPC,
 		Route: route,
 		Data:  data,
 	}
-	a.rpcHandler(a.session, msg, true)
-	return nil
+	return a.rpcHandler(a.session, msg, true, sds...)
 }
 
 // LastMid implements the session.NetworkEntity interface
@@ -87,7 +87,28 @@ func (a *acceptor) Close() error {
 	return err
 }
 
+func (a *acceptor) CloseHandler(ct session.CloseType) error {
+	return a.Close()
+}
+
 // RemoteAddr implements the session.NetworkEntity interface
 func (*acceptor) RemoteAddr() net.Addr {
 	return mock.NetAddr{}
+}
+
+func (a *acceptor) Kick(kt int32, uIds ...int64) error {
+	request := &clusterpb.KickRequest{
+		UIds: uIds,
+		Type: kt,
+	}
+	_, err := a.gateClient.Kick(context.Background(), request)
+	return err
+}
+
+func (a *acceptor) ID() int64 {
+	return a.sid
+}
+
+func (a *acceptor) RpcClientAddr() string {
+	return a.gateAddr
 }

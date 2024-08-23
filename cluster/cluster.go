@@ -26,9 +26,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lonng/nano/cluster/clusterpb"
-	"github.com/lonng/nano/internal/env"
-	"github.com/lonng/nano/internal/log"
+	"gnano/cluster/clusterpb"
+	"gnano/internal/env"
+	"gnano/internal/log"
 )
 
 // cluster represents a nano cluster, which contains a bunch of nano nodes
@@ -66,7 +66,7 @@ func (c *cluster) Register(_ context.Context, req *clusterpb.RegisterRequest) (*
 			} else {
 				c.members = append(c.members[:k], c.members[k+1:]...)
 			}
-			break
+			// break
 			//return nil, fmt.Errorf("address %s has registered", req.MemberInfo.ServiceAddr)
 		}
 	}

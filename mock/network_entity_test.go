@@ -23,7 +23,8 @@ package mock_test
 import (
 	"testing"
 
-	"github.com/lonng/nano/mock"
+	"gnano/mock"
+
 	. "github.com/pingcap/check"
 )
 

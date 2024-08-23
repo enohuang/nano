@@ -1,0 +1,70 @@
+syntax = "proto3";
+package  common;
+//4种交互方式
+// request =>     客户端请求并提供callback 等待服务端响应response    client  to server
+// response <=   服务端响应指定的request 请求         server to client     一对一
+// notify ==>    客户端通知服务端 不需要服务端响应     client to server
+// push  <===     服务端主动向客户端推送         server to client      不需要client先发起 request  主动向客户端推送
+
+option go_package = "../commonpb";
+
+//import "google/protobuf/any.proto";
+
+// client <=== server
+//@comment("错误监听","10001","OnErr")
+message OnErr {
+// 错误提示码
+uint32 code=1;
+// 具体的错误描述信息
+string error=2;
+// 消息标号 无 则不需要  有则需要清除
+uint64  messageId=3;
+// 具体错误码 暂时还没有用到
+uint32 errCode=4;
+}
+
+
+
+message VideoMsg
+{
+int32  iMsgId = 1;    //数字消息id
+string sMsgId = 2;    //字符串消息id
+string proName = 3;   //message 名字
+bytes msg = 4;        //消息体
+int64 timeStamp = 5;  //记录时间戳
+}
+
+message Player
+{
+int32 userid = 1;
+string nickname = 2;
+string headurl = 3;
+int32 gender = 4;
+double chips = 5;
+int32 chairid = 6;
+double carryScore = 7;
+}
+
+message GameVideoData
+{
+string transactionId = 1;    //牌局id
+int32 gameid = 2;            //游戏id
+int64 startTime = 3;         //游戏开始时间
+int64 endTime = 4;           //游戏结束时间
+repeated Player   players = 5;
+repeated VideoMsg    msgs = 6;
+uint32 deskNo=7;      //桌号
+// map 选择的规则 key  匹配key  uint32 具体的值   根据匹配的规则定 当匹配到 需要bool 的时候 则0 为 false  1 为true
+map<string,uint32>  rules=8;
+uint32 roomType=9;    //房间类型  0 公共房 1 私人房
+int32 currRound = 10;    //当前局数
+int32 totalRound = 11;    //总局数
+}
+
+
+// 配牌
+message SetCards {
+// 牌桌编号
+uint32 deskNo=1;
+bytes msg = 2;        //各个子游戏的配牌消息体
+}

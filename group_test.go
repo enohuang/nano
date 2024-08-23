@@ -4,7 +4,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/lonng/nano/session"
+	"gnano/session"
 )
 
 func TestChannel_Add(t *testing.T) {

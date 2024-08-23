@@ -26,18 +26,22 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"gnano/internal/env"
 )
 
+// TODO 新增实时检测会话协程状态操作
 // wsConn is an adapter to t.Conn, which implements all t.Conn
 // interface base on *websocket.Conn
 type wsConn struct {
-	conn   *websocket.Conn
-	typ    int // message type
-	reader io.Reader
+	conn           *websocket.Conn
+	realRemoteAddr string
+	typ            int // message type
+	reader         io.Reader
 }
 
 // newWSConn return an initialized *wsConn
-func newWSConn(conn *websocket.Conn) (*wsConn, error) {
+func newWSConn(conn *websocket.Conn, realRemoteAddr string) (*wsConn, error) {
 	c := &wsConn{conn: conn}
 
 	t, r, err := conn.NextReader()
@@ -47,7 +51,9 @@ func newWSConn(conn *websocket.Conn) (*wsConn, error) {
 
 	c.typ = t
 	c.reader = r
-
+	if realRemoteAddr != "" && net.ParseIP(realRemoteAddr) != nil {
+		c.realRemoteAddr = realRemoteAddr
+	}
 	return c, nil
 }
 
@@ -55,6 +61,11 @@ func newWSConn(conn *websocket.Conn) (*wsConn, error) {
 // Read can be made to time out and return an Error with Timeout() == true
 // after a fixed time limit; see SetDeadline and SetReadDeadline.
 func (c *wsConn) Read(b []byte) (int, error) {
+	// 新增读超时设置 为心跳间隔时间的2倍
+	err := c.conn.SetReadDeadline(time.Now().Add(time.Second * (env.Heartbeat * 2)))
+	if err != nil {
+		return 0, err
+	}
 	n, err := c.reader.Read(b)
 	if err != nil && err != io.EOF {
 		return n, err
@@ -73,7 +84,13 @@ func (c *wsConn) Read(b []byte) (int, error) {
 // Write can be made to time out and return an Error with Timeout() == true
 // after a fixed time limit; see SetDeadline and SetWriteDeadline.
 func (c *wsConn) Write(b []byte) (int, error) {
-	err := c.conn.WriteMessage(websocket.BinaryMessage, b)
+	// 新增写超时设置 为心跳间隔时间的2倍
+	err := c.conn.SetWriteDeadline(time.Now().Add(time.Second * (env.Heartbeat * 2)))
+	if err != nil {
+		return 0, err
+	}
+
+	err = c.conn.WriteMessage(websocket.BinaryMessage, b)
 	if err != nil {
 		return 0, err
 	}
@@ -94,7 +111,21 @@ func (c *wsConn) LocalAddr() net.Addr {
 
 // RemoteAddr returns the remote network address.
 func (c *wsConn) RemoteAddr() net.Addr {
-	return c.conn.RemoteAddr()
+	relAddr := c.conn.RemoteAddr()
+	if c.realRemoteAddr != "" {
+		switch addr := relAddr.(type) {
+		case *net.TCPAddr:
+			addr.IP = net.IP(c.realRemoteAddr)
+			return addr
+		case *net.UDPAddr:
+			addr.IP = net.IP(c.realRemoteAddr)
+			return addr
+		case *net.IPAddr:
+			addr.IP = net.IP(c.realRemoteAddr)
+			return addr
+		}
+	}
+	return relAddr
 }
 
 // SetDeadline sets the read and write deadlines associated

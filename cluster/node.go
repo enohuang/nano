@@ -31,15 +31,16 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/lonng/nano/cluster/clusterpb"
-	"github.com/lonng/nano/component"
-	"github.com/lonng/nano/internal/env"
-	"github.com/lonng/nano/internal/log"
-	"github.com/lonng/nano/internal/message"
-	"github.com/lonng/nano/pipeline"
-	"github.com/lonng/nano/scheduler"
-	"github.com/lonng/nano/session"
 	"google.golang.org/grpc"
+
+	"gnano/cluster/clusterpb"
+	"gnano/component"
+	"gnano/internal/env"
+	"gnano/internal/log"
+	"gnano/internal/message"
+	"gnano/pipeline"
+	"gnano/scheduler"
+	"gnano/session"
 )
 
 // Options contains some configurations for current node
@@ -55,6 +56,7 @@ type Options struct {
 	TSLCertificate     string
 	TSLKey             string
 	UnregisterCallback func(Member)
+	MethodDescExpand   *grpc.MethodDesc
 	RemoteServiceRoute CustomerRemoteServiceRoute
 }
 
@@ -126,6 +128,16 @@ func (n *Node) Handler() *LocalHandler {
 	return n.handler
 }
 
+// 根据服务监听地址获取到节点的RPC客户端对象
+func (n *Node) MemberClient(addr string) (clusterpb.MemberClient, error) {
+	pool, err := n.rpcClient.getConnPool(addr)
+	if err != nil {
+		return nil, err
+	}
+	client := clusterpb.NewMemberClient(pool.Get())
+	return client, nil
+}
+
 func (n *Node) initNode() error {
 	// Current node is not master server and does not contains master
 	// address, so running in singleton mode
@@ -141,8 +153,13 @@ func (n *Node) initNode() error {
 	// Initialize the gRPC server and register service
 	n.server = grpc.NewServer()
 	n.rpcClient = newRPCClient()
-	clusterpb.RegisterMemberServer(n.server, n)
 
+	// TODO 为当前节点拓展rpc 接口
+	if n.Options.MethodDescExpand != nil {
+		clusterpb.Member_ServiceDesc.Methods = append(clusterpb.Member_ServiceDesc.Methods, *n.Options.MethodDescExpand)
+	}
+
+	clusterpb.RegisterMemberServer(n.server, n)
 	go func() {
 		err := n.server.Serve(listener)
 		if err != nil {
@@ -263,8 +280,18 @@ func (n *Node) listenAndServeWS() {
 			log.Println(fmt.Sprintf("Upgrade failure, URI=%s, Error=%s", r.RequestURI, err.Error()))
 			return
 		}
-
-		n.handler.handleWS(conn)
+		// 获取真实IP
+		forwardes := r.Header.Get("X-Forwarded-For")
+		log.Println(fmt.Sprintf("Upgrade Success, X-Forwarded-For=%s", forwardes))
+		var readlRemote string
+		if forwardes != "" {
+			forwardes := strings.Split(forwardes, ",")
+			if len(forwardes) >= 1 {
+				readlRemote = strings.TrimSpace(forwardes[len(forwardes)-1])
+			}
+		}
+		log.Println(fmt.Sprintf("Upgrade Success, readlRemote=%s", readlRemote))
+		n.handler.handleWS(conn, readlRemote)
 	})
 
 	if err := http.ListenAndServe(n.ClientAddr, nil); err != nil {
@@ -285,8 +312,18 @@ func (n *Node) listenAndServeWSTLS() {
 			log.Println(fmt.Sprintf("Upgrade failure, URI=%s, Error=%s", r.RequestURI, err.Error()))
 			return
 		}
-
-		n.handler.handleWS(conn)
+		// 获取真实IP
+		forwardes := r.Header.Get("X-Forwarded-For")
+		log.Println(fmt.Sprintf("Upgrade Success, X-Forwarded-For=%s", forwardes))
+		var readlRemote string
+		if forwardes != "" {
+			forwardes := strings.Split(forwardes, ",")
+			if len(forwardes) >= 1 {
+				readlRemote = strings.TrimSpace(forwardes[len(forwardes)-1])
+			}
+		}
+		log.Println(fmt.Sprintf("Upgrade Success, readlRemote=%s", readlRemote))
+		n.handler.handleWS(conn, readlRemote)
 	})
 
 	if err := http.ListenAndServeTLS(n.ClientAddr, n.TSLCertificate, n.TSLKey, nil); err != nil {
@@ -296,18 +333,51 @@ func (n *Node) listenAndServeWSTLS() {
 
 func (n *Node) storeSession(s *session.Session) {
 	n.mu.Lock()
+	defer n.mu.Unlock()
 	n.sessions[s.ID()] = s
-	n.mu.Unlock()
+	if env.Debug {
+		log.Println("storeSession:", len(n.sessions))
+	}
+
 }
 
 func (n *Node) findSession(sid int64) *session.Session {
 	n.mu.RLock()
+	defer n.mu.RUnlock()
 	s := n.sessions[sid]
-	n.mu.RUnlock()
+
 	return s
 }
 
-func (n *Node) findOrCreateSession(sid int64, gateAddr string) (*session.Session, error) {
+func (n *Node) findSessionByUid(uId int64) (*session.Session, bool) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	for _, s := range n.sessions {
+		if s.UID() == uId {
+			return s, true
+		}
+	}
+	return nil, false
+}
+
+func (n *Node) findSessionByUids(uIds ...int64) ([]*session.Session, bool) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	sessions := make([]*session.Session, 0)
+	for i := 0; i < len(uIds); i++ {
+		for _, s := range n.sessions {
+			if s.UID() == uIds[i] {
+				sessions = append(sessions, s)
+			}
+		}
+	}
+	if len(sessions) <= 0 {
+		return nil, false
+	}
+	return sessions, true
+}
+
+func (n *Node) findOrCreateSession(sid int64, gateAddr string, uId int64) (*session.Session, error) {
 	n.mu.RLock()
 	s, found := n.sessions[sid]
 	n.mu.RUnlock()
@@ -322,7 +392,7 @@ func (n *Node) findOrCreateSession(sid int64, gateAddr string) (*session.Session
 			rpcHandler: n.handler.remoteProcess,
 			gateAddr:   gateAddr,
 		}
-		s = session.New(ac)
+		s = session.NewBindUid(ac, uId)
 		ac.session = s
 		n.mu.Lock()
 		n.sessions[sid] = s
@@ -336,7 +406,7 @@ func (n *Node) HandleRequest(_ context.Context, req *clusterpb.RequestMessage) (
 	if !found {
 		return nil, fmt.Errorf("service not found in current node: %v", req.Route)
 	}
-	s, err := n.findOrCreateSession(req.SessionId, req.GateAddr)
+	s, err := n.findOrCreateSession(req.SessionId, req.GateAddr, req.UId)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +425,7 @@ func (n *Node) HandleNotify(_ context.Context, req *clusterpb.NotifyMessage) (*c
 	if !found {
 		return nil, fmt.Errorf("service not found in current node: %v", req.Route)
 	}
-	s, err := n.findOrCreateSession(req.SessionId, req.GateAddr)
+	s, err := n.findOrCreateSession(req.SessionId, req.GateAddr, req.UId)
 	if err != nil {
 		return nil, err
 	}
@@ -368,12 +438,47 @@ func (n *Node) HandleNotify(_ context.Context, req *clusterpb.NotifyMessage) (*c
 	return &clusterpb.MemberHandleResponse{}, nil
 }
 
+func (n *Node) HandleRPC(_ context.Context, req *clusterpb.RPCMessage) (*clusterpb.MemberHandleResponse, error) {
+	handler, found := n.handler.localHandlers[req.Route]
+	if !found {
+		return nil, fmt.Errorf("service not found in current node: %v", req.Route)
+	}
+
+	// 是否需要使用旧的sessionId 设置为本地新建的会话对象sessionId
+	if len(req.Sessions) <= 0 {
+		req.Sessions = make(map[int64]string, 0)
+		req.Sessions[req.SessionId] = req.GateAddr
+	}
+
+	// 为多个会话编号生成会话对象
+	var sessions = make([]*session.Session, 0)
+	for k, v := range req.Sessions {
+		s, err := n.findOrCreateSession(k, v, req.UId)
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, s)
+	}
+	msg := &message.Message{
+		Type:  message.RPC,
+		Route: req.Route,
+		Data:  req.Data,
+	}
+	n.handler.localProcess(handler, 0, sessions[0], msg, sessions...)
+	return &clusterpb.MemberHandleResponse{}, nil
+}
+
 func (n *Node) HandlePush(_ context.Context, req *clusterpb.PushMessage) (*clusterpb.MemberHandleResponse, error) {
 	s := n.findSession(req.SessionId)
 	if s == nil {
 		return &clusterpb.MemberHandleResponse{}, fmt.Errorf("session not found: %v", req.SessionId)
 	}
-	return &clusterpb.MemberHandleResponse{}, s.Push(req.Route, req.Data)
+	err := s.Push(req.Route, req.Data)
+	if err != nil && errors.Is(err, ErrBrokenPipe) {
+		return &clusterpb.MemberHandleResponse{}, nil
+	}
+
+	return &clusterpb.MemberHandleResponse{}, err
 }
 
 func (n *Node) HandleResponse(_ context.Context, req *clusterpb.ResponseMessage) (*clusterpb.MemberHandleResponse, error) {
@@ -381,10 +486,15 @@ func (n *Node) HandleResponse(_ context.Context, req *clusterpb.ResponseMessage)
 	if s == nil {
 		return &clusterpb.MemberHandleResponse{}, fmt.Errorf("session not found: %v", req.SessionId)
 	}
-	return &clusterpb.MemberHandleResponse{}, s.ResponseMID(req.Id, req.Data)
+	err := s.ResponseMID(req.Id, req.Data)
+	if err != nil && (errors.Is(err, ErrBrokenPipe) || errors.Is(err, ErrSessionOnNotify)) {
+		return &clusterpb.MemberHandleResponse{}, nil
+	}
+	return &clusterpb.MemberHandleResponse{}, err
 }
 
 func (n *Node) NewMember(_ context.Context, req *clusterpb.NewMemberRequest) (*clusterpb.NewMemberResponse, error) {
+	log.Println("DelMember member", req.String())
 	n.handler.addRemoteService(req.MemberInfo)
 	n.cluster.addMember(req.MemberInfo)
 	return &clusterpb.NewMemberResponse{}, nil
@@ -398,6 +508,7 @@ func (n *Node) DelMember(_ context.Context, req *clusterpb.DelMemberRequest) (*c
 }
 
 // SessionClosed implements the MemberServer interface
+// 当网关中连接对象断开连接后 进行其它节点中的会话对象移除
 func (n *Node) SessionClosed(_ context.Context, req *clusterpb.SessionClosedRequest) (*clusterpb.SessionClosedResponse, error) {
 	n.mu.Lock()
 	s, found := n.sessions[req.SessionId]
@@ -405,6 +516,14 @@ func (n *Node) SessionClosed(_ context.Context, req *clusterpb.SessionClosedRequ
 	n.mu.Unlock()
 	if found {
 		scheduler.PushTask(func() { session.Lifetime.Close(s) })
+	}
+	// 还存在其它相同玩家编号的会话对象需要移除
+	// 会同步移除掉其它节点中相同玩家编号的session
+	us, found := n.findSessionByUid(req.UId)
+	if found {
+		n.mu.Lock()
+		delete(n.sessions, us.ID())
+		n.mu.Unlock()
 	}
 	return &clusterpb.SessionClosedResponse{}, nil
 }
@@ -416,9 +535,49 @@ func (n *Node) CloseSession(_ context.Context, req *clusterpb.CloseSessionReques
 	delete(n.sessions, req.SessionId)
 	n.mu.Unlock()
 	if found {
+		// 节点主动发起会话关闭
 		s.Close()
 	}
 	return &clusterpb.CloseSessionResponse{}, nil
+}
+
+func (n *Node) Kick(_ context.Context, req *clusterpb.KickRequest) (*clusterpb.KickResponse, error) {
+	var ss []*session.Session
+	var found bool
+	// 服务器维护踢人
+	if req.Type == message.RepairKick {
+		n.mu.Lock()
+		ss = make([]*session.Session, 0)
+		for _, v := range n.sessions {
+			ss = append(ss, v)
+		}
+		n.sessions = make(map[int64]*session.Session)
+		n.mu.Unlock()
+	} else {
+		// 非服务器维护踢人
+		ss, found = n.findSessionByUids(req.UIds...)
+		if found {
+			n.mu.Lock()
+			for i := 0; i < len(ss); i++ {
+				delete(n.sessions, ss[i].ID())
+			}
+			n.mu.Unlock()
+		}
+	}
+
+	// 批量踢人
+	for i := 0; i < len(ss); i++ {
+		if ss[i] != nil {
+			//  gate   调用的是agent.go 下的
+			ss[i].Kick(req.Type, ss[i].UID())
+		}
+	}
+	return &clusterpb.KickResponse{}, nil
+}
+
+func (n *Node) SwithMode(_ context.Context, req *clusterpb.SwithModeRequest) (*clusterpb.SwithModeResponse, error) {
+	env.Mode = env.ModeType(req.Mode)
+	return &clusterpb.SwithModeResponse{}, nil
 }
 
 // ticker send heartbeat register info to master

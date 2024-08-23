@@ -25,9 +25,10 @@ import (
 	"net"
 	"sync"
 
-	"github.com/lonng/nano/internal/codec"
-	"github.com/lonng/nano/internal/message"
-	"github.com/lonng/nano/internal/packet"
+	"gnano/internal/codec"
+	"gnano/internal/message"
+	"gnano/internal/packet"
+
 	"google.golang.org/protobuf/proto"
 )
 

@@ -24,7 +24,7 @@ import (
 	"bytes"
 	"errors"
 
-	"github.com/lonng/nano/internal/packet"
+	"gnano/internal/packet"
 )
 
 // Codec constants.
@@ -54,7 +54,7 @@ func NewDecoder() *Decoder {
 func (c *Decoder) forward() error {
 	header := c.buf.Next(HeadLength)
 	c.typ = header[0]
-	if c.typ < packet.Handshake || c.typ > packet.Kick {
+	if c.typ < packet.Handshake || c.typ > packet.RepairKick {
 		return packet.ErrWrongPacketType
 	}
 	c.size = bytesToInt(header[1:])
@@ -112,7 +112,7 @@ func (c *Decoder) Decode(data []byte) ([]*packet.Packet, error) {
 // --------|------------------------|--------
 // 1 byte packet type, 3 bytes packet data length(big end), and data segment
 func Encode(typ packet.Type, data []byte) ([]byte, error) {
-	if typ < packet.Handshake || typ > packet.Kick {
+	if typ < packet.Handshake || typ > packet.RepairKick {
 		return nil, packet.ErrWrongPacketType
 	}
 

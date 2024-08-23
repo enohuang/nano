@@ -34,3 +34,13 @@ func (c *Base) BeforeShutdown() {}
 
 // Shutdown was called to shutdown the component.
 func (c *Base) Shutdown() {}
+
+// Name
+func (c *Base) Name() string {
+	return ""
+}
+
+// SchedName
+func (c *Base) SchedName() string {
+	return ""
+}

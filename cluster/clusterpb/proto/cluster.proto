@@ -41,14 +41,30 @@ message RequestMessage {
     uint64 id = 3;
     string route = 4;
     bytes data = 5;
+    int64 uId=6;
 }
 
 message NotifyMessage {
     string gateAddr = 1;
     int64 sessionId = 2;
-    string route = 3;
-    bytes data = 4;
+    // map<int64,string> sessions = 3;
+    string route = 4;
+    bytes data = 5;
+    int64 uId=6;
 }
+
+
+message RPCMessage {
+    string gateAddr = 1;
+    int64 sessionId = 2;
+    map<int64,string> sessions = 3;
+    string route = 4;
+    bytes data = 5;
+    int64 uId=6;
+}
+
+
+
 
 message ResponseMessage {
     int64 sessionId = 1;
@@ -78,6 +94,7 @@ message DelMemberResponse {}
 
 message SessionClosedRequest {
     int64 sessionId = 1;
+    int64 uId = 2;
 }
 
 message SessionClosedResponse {}
@@ -88,14 +105,33 @@ message CloseSessionRequest {
 
 message CloseSessionResponse {}
 
+
+message KickRequest {
+    // 批量踢人
+    repeated int64 uIds = 1;
+    int32 type=2;
+}
+
+message KickResponse {}
+
+message SwithModeRequest {
+    //  0 为正常模式  1 为维护模式
+    uint32 mode=1;
+}
+
+message  SwithModeResponse {}
+
+
 service Member {
     rpc HandleRequest (RequestMessage) returns (MemberHandleResponse) {}
     rpc HandleNotify (NotifyMessage) returns (MemberHandleResponse) {}
+    rpc HandleRPC (RPCMessage) returns (MemberHandleResponse) {}
     rpc HandlePush (PushMessage) returns (MemberHandleResponse) {}
     rpc HandleResponse (ResponseMessage) returns (MemberHandleResponse) {}
-
     rpc NewMember (NewMemberRequest) returns (NewMemberResponse) {}
     rpc DelMember (DelMemberRequest) returns (DelMemberResponse) {}
     rpc SessionClosed(SessionClosedRequest) returns(SessionClosedResponse) {}
     rpc CloseSession(CloseSessionRequest) returns(CloseSessionResponse) {}
+    rpc Kick(KickRequest) returns(KickResponse) {}
+    rpc SwithMode(SwithModeRequest) returns(SwithModeResponse) {}
 }

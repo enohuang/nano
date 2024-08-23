@@ -1,0 +1,206 @@
+syntax = "proto3";
+package  game;
+
+//4种交互方式
+
+
+// request =>     客户端请求并提供callback 等待服务端响应response    client  to server
+// response <=   服务端响应指定的request 请求         server to client     一对一
+// notify ==>    客户端通知服务端 不需要服务端响应     client to server
+// push  <===     服务端主动向客户端推送         server to client   不需要client先发起 request  主动向客户端推送
+option go_package = "../gamepb;";
+
+
+message Begin {
+  // 牌桌编号  123456
+  uint32 deskNo=1;
+  // 交易编号   123456 + 20230122  + 00001    房间号 + 年月日 + 轮数递增   或者 uuid  构成 牌桌编号
+  string transactionId=2;
+  // map 选择的规则 key  匹配key  uint32 具体的值   根据匹配的规则定 当匹配到 需要bool 的时候 则0 为 false  1 为true
+  map<string,uint32>  rules=3;
+  // map 会话编号 玩家列表信息 key 为会话对象唯一标识
+  map<int64,Player> players=4;
+  // 总人数
+  uint32 peopleNum=5;
+  // 当前轮数
+  uint32 roundNum=6;
+  // 抽水比例
+  double ratio=7;
+  //房间类型  0 公共房 1 私人房
+  uint32 type=8;
+  // 俱乐部编号
+  uint64  clubId=9;
+  //  观看玩家列表  观看玩家编号  将观看玩家的会话对象也绑定 房间的消息队列 做观看玩家的离开处理 同步房间内的广播消息
+  map<int64,uint64> watchPlayers=10;
+}
+
+message  Player {
+  //玩家座位位置   未入坐 则是-1
+  int32 deskPos=1;
+  //  玩家编号
+  uint64  uid=2;
+  //  玩家昵称
+  string nickname=3;
+  //  玩家性别
+  uint32 sex=4;
+  //  头像
+  string headUrl=5;
+  //  玩家余额
+  double score=6;
+  // 玩家是否准备
+  bool isReady=7;
+  //  玩家ip地址
+  string ip=8;
+  // 玩家带入金额
+  double carryScore=9;
+  //  玩家是否离线
+  bool   offline=20;
+}
+
+
+//   下注   每一轮结算   总结算
+message PlayerSettle {
+  // 牌桌编号
+  uint32 deskNo=1;
+  // 交易编号   123456 + 20230122  + 00001    房间号 + 年月日 + 轮数递增   或者 uuid  构成 牌桌编号
+  string transactionId=2;
+  //   当前轮数
+  uint32 roundNum=3;
+  // 玩家结算信息
+  repeated  PlayerSettleInfo playerSettleInfos=4;
+  // 是否为最后一轮   为大结算 需要对大赢家进行抽水
+  bool isLastRound=7;
+  // 游戏开始时间 毫秒时间戳
+  int64 start=8;
+  // 游戏结束时间 毫秒时间戳
+  int64 end =9;
+}
+
+
+
+
+//  单个玩家结算信息
+message PlayerSettleInfo{
+  //  玩家编号
+  uint64  uid=1;
+  //   false 减  true  加操作
+  bool action =2;
+  //  玩家输赢分数 正数  根据 action 进行加减操作   后续调整为正负值
+  double score=3;
+  //抽水金额
+  double pumpWater=4;
+  // 总下注筹码
+  double totalBet=5;
+  // 位置
+  int32 postion =6;
+  // 牌型
+  string cardType =7;
+  // 开始前金额
+  double beforeBalance=8;
+  //  开始后金额
+  double afterBalance=9;
+  // 投注倍数
+  double betMultiple=10;
+  // 抢庄倍数
+  double bankMultiple=11;
+}
+
+// 每一轮的结算信息
+message Settle {
+  // 牌桌编号 123456
+  uint32 deskNo=1;
+  // 交易编号   123456 + 20230122  + 00001    房间号 + 年月日 + 轮数递增   或者 uuid  构成 牌桌编号
+  string transactionId=2;
+  //   当前轮数
+  uint32 roundNum=3;
+  //   玩家结算信息
+  repeated PlayerSettleInfo playerSettleInfos=4;
+  // 是否为最后一轮   为大结算 需要对大赢家进行抽水
+  bool isLastRound=7;
+}
+
+
+message SettleHisotry {
+  PlayerSettle playerSettle =1;
+  // 规则描述
+  string desc =2;
+}
+
+// 轮结束
+message RoundOver {
+  // 牌桌编号
+  uint32 deskNo=1;
+  // 是否为最后一轮
+  bool isLastRound=3;
+  //   当前轮数
+  uint32 roundNum=4;
+  // 是否解散
+  bool isDissolution=5;
+  // 解散类型   0  正常解散  1 立即结算解散
+  uint32 dissolutionType=6;
+}
+
+
+// 重新登陆断线重连
+message ReJoin {
+  // 牌桌编号
+  uint32 deskNo=1;
+  //  玩家编号
+  uint64  uId=2;
+}
+
+//游戏场景内重新连接
+message ReConnect {
+  // 牌桌编号
+  uint32 deskNo=1;
+  //  玩家编号
+  uint64  uid=2;
+}
+
+// 玩家挂后台
+message Pause {
+  // 牌桌编号
+  uint32 deskNo=1;
+  //  玩家编号
+  uint64  uid=2;
+}
+
+// 玩家切后台回来
+message Resume {
+  // 牌桌编号
+  uint32 deskNo=1;
+  //  玩家编号
+  uint64  uid=2;
+}
+
+// 正常解散
+message Dissolve {
+  // 牌桌编号
+  uint32 deskNo=2;
+  // 交易编号   123456 + 20230122  + 00001    房间号 + 年月日 + 轮数递增   或者 uuid  构成 牌桌编号
+  string transactionId=3;
+}
+
+// 强制解散
+message ForceDissolve {
+  // 牌桌编号
+  uint32 deskNo=1;
+  // 交易编号   123456 + 20230122  + 00001    房间号 + 年月日 + 轮数递增   或者 uuid  构成 牌桌编号
+  string transactionId=2;
+}
+
+// 中途加入
+message MidWayEnter {
+  // 牌桌编号
+  uint32 deskNo=1;
+  //  玩家编号
+  uint64  uId=2;
+}
+
+// 观看玩家离开
+message WatchLeave{
+  // 牌桌编号
+  uint32 deskNo=1;
+  //  玩家编号
+  uint64  uId=2;
+}

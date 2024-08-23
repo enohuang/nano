@@ -26,7 +26,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lonng/nano/internal/log"
+	"gnano/internal/log"
 )
 
 // Type represents the type of message, which could be Request/Notify/Response/Push
@@ -38,6 +38,14 @@ const (
 	Notify        = 0x01
 	Response      = 0x02
 	Push          = 0x03
+	// 踢人
+	Kick = 0x04
+	// 服务之间 RPC 调用
+	RPC = 0x05
+	//账号重复登陆
+	RepeatLogin = 0x06
+	//维护模式踢出
+	RepairKick = 0x07
 )
 
 const (
@@ -182,6 +190,9 @@ func Decode(data []byte) (*Message, error) {
 		// variant length encode
 		for i := offset; i < len(data); i++ {
 			b := data[i]
+			// 0x7F后7位
+			// <<  第一个1
+			// uint64() 转成10进制
 			id += uint64(b&0x7F) << uint64(7*(i-offset))
 			if b < 128 {
 				offset = i + 1

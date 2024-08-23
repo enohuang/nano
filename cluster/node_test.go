@@ -1,15 +1,17 @@
 package cluster_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/lonng/nano/benchmark/io"
-	"github.com/lonng/nano/benchmark/testdata"
-	"github.com/lonng/nano/cluster"
-	"github.com/lonng/nano/component"
-	"github.com/lonng/nano/scheduler"
-	"github.com/lonng/nano/session"
+	"gnano/benchmark/io"
+	"gnano/benchmark/testdata"
+	"gnano/cluster"
+	"gnano/component"
+	"gnano/scheduler"
+	"gnano/session"
+
 	. "github.com/pingcap/check"
 )
 
@@ -23,10 +25,12 @@ type (
 	GameComponent   struct{ component.Base }
 )
 
+// 一个父组件 提供Test 路由
 func (c *MasterComponent) Test(session *session.Session, _ []byte) error {
 	return session.Push("test", &testdata.Pong{Content: "master server pong"})
 }
 
+// 一个大门组件 提供两个路由
 func (c *GateComponent) Test(session *session.Session, ping *testdata.Ping) error {
 	return session.Push("test", &testdata.Pong{Content: "gate server pong"})
 }
@@ -35,6 +39,7 @@ func (c *GateComponent) Test2(session *session.Session, ping *testdata.Ping) err
 	return session.Response(&testdata.Pong{Content: "gate server pong2"})
 }
 
+// 一个游戏组件提供两个路由
 func (c *GameComponent) Test(session *session.Session, _ []byte) error {
 	return session.Push("test", &testdata.Pong{Content: "game server pong"})
 }
@@ -61,6 +66,7 @@ func (s *nodeSuite) TestNodeStartup(c *C) {
 		ServiceAddr: "127.0.0.1:4450",
 	}
 	err := masterNode.Startup()
+
 	c.Assert(err, IsNil)
 	masterHandler := masterNode.Handler()
 	c.Assert(masterHandler.LocalService(), DeepEquals, []string{"MasterComponent"})
@@ -76,6 +82,7 @@ func (s *nodeSuite) TestNodeStartup(c *C) {
 		ServiceAddr: "127.0.0.1:14451",
 	}
 	err = memberNode1.Startup()
+
 	c.Assert(err, IsNil)
 	member1Handler := memberNode1.Handler()
 	c.Assert(masterHandler.LocalService(), DeepEquals, []string{"MasterComponent"})
@@ -93,6 +100,7 @@ func (s *nodeSuite) TestNodeStartup(c *C) {
 		ServiceAddr: "127.0.0.1:24451",
 	}
 	err = memberNode2.Startup()
+
 	c.Assert(err, IsNil)
 	member2Handler := memberNode2.Handler()
 	c.Assert(masterHandler.LocalService(), DeepEquals, []string{"MasterComponent"})
@@ -128,11 +136,13 @@ func (s *nodeSuite) TestNodeStartup(c *C) {
 
 	err = connector.Request("GateComponent.Test2", &testdata.Ping{Content: "ping"}, func(data interface{}) {
 		onResult <- string(data.([]byte))
+
 	})
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(<-onResult, "gate server pong2"), IsTrue)
 
 	err = connector.Request("GameComponent.Test2", &testdata.Ping{Content: "ping"}, func(data interface{}) {
+		fmt.Print(string(data.([]byte)))
 		onResult <- string(data.([]byte))
 	})
 	c.Assert(err, IsNil)

@@ -28,14 +28,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lonng/nano/internal/codec"
-	"github.com/lonng/nano/internal/env"
-	"github.com/lonng/nano/internal/log"
-	"github.com/lonng/nano/internal/message"
-	"github.com/lonng/nano/internal/packet"
-	"github.com/lonng/nano/pipeline"
-	"github.com/lonng/nano/scheduler"
-	"github.com/lonng/nano/session"
+	"gnano/internal/codec"
+	"gnano/internal/env"
+	"gnano/internal/log"
+	"gnano/internal/message"
+	"gnano/internal/packet"
+	"gnano/pipeline"
+	"gnano/pkg"
+	"gnano/scheduler"
+	"gnano/session"
 )
 
 const (
@@ -93,7 +94,6 @@ func newAgent(conn net.Conn, pipeline pipeline.Pipeline, rpcHandler rpcHandler) 
 	s := session.New(a)
 	a.session = s
 	a.srv = reflect.ValueOf(s)
-
 	return a
 }
 
@@ -137,23 +137,21 @@ func (a *agent) Push(route string, v interface{}) error {
 }
 
 // RPC, implementation for session.NetworkEntity interface
-func (a *agent) RPC(route string, v interface{}) error {
+func (a *agent) RPC(route string, v interface{}, sds ...pkg.SessionData) error {
 	if a.status() == statusClosed {
 		return ErrBrokenPipe
 	}
-
 	// TODO: buffer
 	data, err := message.Serialize(v)
 	if err != nil {
 		return err
 	}
 	msg := &message.Message{
-		Type:  message.Notify,
+		Type:  message.RPC,
 		Route: route,
 		Data:  data,
 	}
-	a.rpcHandler(a.session, msg, true)
-	return nil
+	return a.rpcHandler(a.session, msg, true, sds...)
 }
 
 // Response, implementation for session.NetworkEntity interface
@@ -191,6 +189,8 @@ func (a *agent) ResponseMid(mid uint64, v interface{}) error {
 	return a.send(pendingMessage{typ: message.Response, mid: mid, payload: v})
 }
 
+// a.send(pendingMessage{typ: message.RepeatLogin})
+// 关闭 TCP  或者  Websocket 连接对象的时候 触发
 // Close, implementation for session.NetworkEntity interface
 // Close closes the agent, clean inner state and close low-level connection.
 // Any blocked Read or Write operations will be unblocked and return errors.
@@ -198,6 +198,7 @@ func (a *agent) Close() error {
 	if a.status() == statusClosed {
 		return ErrCloseClosedSession
 	}
+
 	a.setStatus(statusClosed)
 
 	if env.Debug {
@@ -211,10 +212,21 @@ func (a *agent) Close() error {
 		// expect
 	default:
 		close(a.chDie)
+		// 调用 session.Lifetime.OnClose() 函数注册上去的关闭时需要执行的函数
 		scheduler.PushTask(func() { session.Lifetime.Close(a.session) })
 	}
-
 	return a.conn.Close()
+}
+
+func (a *agent) CloseHandler(ct session.CloseType) error {
+	switch ct {
+	case session.RepairKick:
+		a.send(pendingMessage{typ: message.RepairKick})
+	case session.RepeatLogin:
+		a.send(pendingMessage{typ: message.RepeatLogin})
+	default:
+	}
+	return a.Close()
 }
 
 // RemoteAddr, implementation for session.NetworkEntity interface
@@ -239,6 +251,7 @@ func (a *agent) setStatus(state int32) {
 func (a *agent) write() {
 	ticker := time.NewTicker(env.Heartbeat)
 	chWrite := make(chan []byte, agentWriteBacklog)
+	var isKick bool
 	// clean func
 	defer func() {
 		ticker.Stop()
@@ -259,15 +272,33 @@ func (a *agent) write() {
 				return
 			}
 			chWrite <- hbd
-
 		case data := <-chWrite:
 			// close agent while low-level conn broken
 			if _, err := a.conn.Write(data); err != nil {
 				log.Println(err.Error())
 				return
 			}
-
+			// 是kick 消息
+			if isKick {
+				isKick = false
+				return
+			}
 		case data := <-a.chSend:
+
+			if data.typ == message.Kick {
+				isKick = true
+				chWrite <- kick
+				break
+			} else if data.typ == message.RepeatLogin {
+				isKick = true
+				chWrite <- repeatLogin
+				break
+			} else if data.typ == message.RepairKick {
+				isKick = true
+				chWrite <- repairKick
+				break
+			}
+
 			payload, err := message.Serialize(data.payload)
 			if err != nil {
 				switch data.typ {
@@ -280,7 +311,6 @@ func (a *agent) write() {
 				}
 				break
 			}
-
 			// construct message and encode
 			m := &message.Message{
 				Type:  data.typ,
@@ -301,7 +331,6 @@ func (a *agent) write() {
 				log.Println(err.Error())
 				break
 			}
-
 			// packet encode
 			p, err := codec.Encode(packet.Data, em)
 			if err != nil {
@@ -317,4 +346,26 @@ func (a *agent) write() {
 			return
 		}
 	}
+}
+
+func (a *agent) Kick(kt int32, _ ...int64) error {
+	if a.status() == statusClosed {
+		return ErrBrokenPipe
+	}
+	var typ message.Type = message.Kick
+	switch kt {
+	case message.RepairKick:
+		typ = message.RepairKick
+	}
+	return a.send(pendingMessage{typ: typ})
+}
+
+// 取出会话编号
+func (a *agent) ID() int64 {
+	return a.session.ID()
+}
+
+// 获取rpcClient 地址
+func (a *agent) RpcClientAddr() string {
+	return ""
 }

@@ -38,6 +38,7 @@ func init() {
 
 var (
 	Println func(v ...interface{})
+	Errorf  func(err string, v ...interface{})
 	Fatal   func(v ...interface{})
 	Fatalf  func(format string, v ...interface{})
 )
@@ -50,4 +51,5 @@ func SetLogger(logger Logger) {
 	Println = logger.Println
 	Fatal = logger.Fatal
 	Fatalf = logger.Fatalf
+
 }

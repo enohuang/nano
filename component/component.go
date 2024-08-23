@@ -26,4 +26,6 @@ type Component interface {
 	AfterInit()
 	BeforeShutdown()
 	Shutdown()
+	Name() string
+	SchedName() string
 }

@@ -27,8 +27,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lonng/nano/internal/env"
 	"google.golang.org/grpc"
+
+	"gnano/internal/env"
 )
 
 type connPool struct {
@@ -75,6 +76,7 @@ func (a *connPool) init(addr string) error {
 
 func (a *connPool) Get() *grpc.ClientConn {
 	next := atomic.AddUint32(&a.index, 1) % uint32(len(a.v))
+
 	return a.v[next]
 }
 
@@ -121,7 +123,8 @@ func (c *rpcClient) createConnPool(addr string) (*connPool, error) {
 	if !ok {
 		var err error
 		// TODO: make conn count configurable
-		array, err = newConnArray(10, addr)
+		// array, err = newConnArray(10, addr)
+		array, err = newConnArray(env.ConnArrayMaxSize, addr)
 		if err != nil {
 			return nil, err
 		}

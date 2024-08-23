@@ -20,6 +20,6 @@
 
 package runtime
 
-import "github.com/lonng/nano/cluster"
+import "gnano/cluster"
 
 var CurrentNode *cluster.Node
