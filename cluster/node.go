@@ -494,7 +494,7 @@ func (n *Node) HandleResponse(_ context.Context, req *clusterpb.ResponseMessage)
 }
 
 func (n *Node) NewMember(_ context.Context, req *clusterpb.NewMemberRequest) (*clusterpb.NewMemberResponse, error) {
-	log.Println("DelMember member", req.String())
+	log.Println("NewMember member", req.String())
 	n.handler.addRemoteService(req.MemberInfo)
 	n.cluster.addMember(req.MemberInfo)
 	return &clusterpb.NewMemberResponse{}, nil

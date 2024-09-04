@@ -280,6 +280,7 @@ func (a *agent) write() {
 			}
 			// 是kick 消息
 			if isKick {
+				time.Sleep(30 * time.Millisecond)
 				isKick = false
 				return
 			}

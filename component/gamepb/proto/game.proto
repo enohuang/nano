@@ -55,6 +55,10 @@ message  Player {
   double carryScore=9;
   //  玩家是否离线
   bool   offline=20;
+  // 商户号
+  int32 businessId=21;
+  // 站点
+  string site=22;
 }
 
 
