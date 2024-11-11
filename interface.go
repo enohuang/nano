@@ -100,6 +100,9 @@ func Listen(addr string, opts ...Option) {
 	runtime.CurrentNode = node
 
 	if node.ClientAddr != "" {
+		if node.IsWebsocket {
+			log.Println("WebSocket Upgrader %s" + "/" + strings.TrimPrefix(env.WSPath, "/"))
+		}
 		log.Println(fmt.Sprintf("Startup *Nano gate server* %s, client address: %v, service address: %s",
 			app.name, node.ClientAddr, node.ServiceAddr))
 	} else {

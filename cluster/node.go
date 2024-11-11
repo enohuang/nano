@@ -322,7 +322,7 @@ func (n *Node) listenAndServeWSTLS() {
 				readlRemote = strings.TrimSpace(forwardes[len(forwardes)-1])
 			}
 		}
-		log.Println(fmt.Sprintf("Upgrade Success, readlRemote=%s", readlRemote))
+		// log.Println(fmt.Sprintf("Upgrade Success, readlRemote=%s", readlRemote))
 		n.handler.handleWS(conn, readlRemote)
 	})
 
@@ -339,6 +339,15 @@ func (n *Node) storeSession(s *session.Session) {
 		log.Println("storeSession:", len(n.sessions))
 	}
 
+}
+
+func (n *Node) removeSession(sessionId int64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	delete(n.sessions, sessionId)
+	if env.Debug {
+		log.Println("removed Session  num:", len(n.sessions))
+	}
 }
 
 func (n *Node) findSession(sid int64) *session.Session {

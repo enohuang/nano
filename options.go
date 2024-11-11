@@ -16,6 +16,7 @@ import (
 	"gnano/service"
 )
 
+// TODO config.toml 新增NodeId与房间号高位绑定的配置
 type Option func(*cluster.Options)
 
 func WithPipeline(pipeline pipeline.Pipeline) Option {
@@ -179,6 +180,7 @@ func WithHandshakeValidator(fn func([]byte) error) Option {
 	}
 }
 
+// TODO NodeId 开放出来
 // WithNodeId set nodeId use snowflake nodeId generate sessionId, default: pid
 func WithNodeId(nodeId uint64) Option {
 	return func(opt *cluster.Options) {

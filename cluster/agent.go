@@ -93,6 +93,7 @@ func newAgent(conn net.Conn, pipeline pipeline.Pipeline, rpcHandler rpcHandler) 
 	// binding session
 	s := session.New(a)
 	a.session = s
+	s.Set("Gate", scheduler.NewDefaultScheduler())
 	a.srv = reflect.ValueOf(s)
 	return a
 }
@@ -280,7 +281,7 @@ func (a *agent) write() {
 			}
 			// 是kick 消息
 			if isKick {
-				time.Sleep(30 * time.Millisecond)
+				// time.Sleep(100 * time.Millisecond)
 				isKick = false
 				return
 			}

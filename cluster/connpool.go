@@ -32,6 +32,7 @@ import (
 	"gnano/internal/env"
 )
 
+// TODO 连接池优化  最大数 空闲数  超时销毁  再创建
 type connPool struct {
 	index uint32
 	v     []*grpc.ClientConn

@@ -112,19 +112,19 @@ func (c *wsConn) LocalAddr() net.Addr {
 // RemoteAddr returns the remote network address.
 func (c *wsConn) RemoteAddr() net.Addr {
 	relAddr := c.conn.RemoteAddr()
-	if c.realRemoteAddr != "" {
-		switch addr := relAddr.(type) {
-		case *net.TCPAddr:
-			addr.IP = net.IP(c.realRemoteAddr)
-			return addr
-		case *net.UDPAddr:
-			addr.IP = net.IP(c.realRemoteAddr)
-			return addr
-		case *net.IPAddr:
-			addr.IP = net.IP(c.realRemoteAddr)
-			return addr
-		}
-	}
+	// if c.realRemoteAddr != "" {
+	// 	switch addr := relAddr.(type) {
+	// 	case *net.TCPAddr:
+	// 		addr.IP = net.IP(c.realRemoteAddr)
+	// 		return addr
+	// 	case *net.UDPAddr:
+	// 		addr.IP = net.IP(c.realRemoteAddr)
+	// 		return addr
+	// 	case *net.IPAddr:
+	// 		addr.IP = net.IP(c.realRemoteAddr)
+	// 		return addr
+	// 	}
+	// }
 	return relAddr
 }
 

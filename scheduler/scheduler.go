@@ -31,9 +31,10 @@ import (
 )
 
 const (
-	messageQueueBacklog = 1 << 10
-	sessionCloseBacklog = 1 << 8
-
+	// 当前节点的消息队列大小
+	globalMessageQueuelog = 1 << 10
+	// 当前房间的消息队列大小
+	roomMessageQueuelog = 1 << 6
 	// 关闭
 	statusClosed = 4
 )
@@ -59,7 +60,7 @@ type QueueLocalScheduler struct {
 
 // QueueLocalScheduler
 func NewQueueLocalScheduler() *QueueLocalScheduler {
-	qs := &QueueLocalScheduler{chTasks: make(chan Task, 1<<6), chDie: make(chan struct{}), openTime: time.Now()}
+	qs := &QueueLocalScheduler{chTasks: make(chan Task, roomMessageQueuelog), chDie: make(chan struct{}), openTime: time.Now()}
 	log.Println("open time %v", qs.openTime.String())
 	//消费消息队列
 	go qs.Sched()
@@ -124,7 +125,7 @@ type TimerQueueScheduler struct {
 
 // QueueLocalScheduler
 func NewTimerQueueScheduler(d time.Duration) *TimerQueueScheduler {
-	qs := &TimerQueueScheduler{chTasks: make(chan Task, 1<<6), chDie: make(chan struct{}), openTime: time.Now(), Ticker: time.NewTicker(d), hooks: make([]Hook, 0)}
+	qs := &TimerQueueScheduler{chTasks: make(chan Task, roomMessageQueuelog), chDie: make(chan struct{}), openTime: time.Now(), Ticker: time.NewTicker(d), hooks: make([]Hook, 0)}
 	log.Println("open time %v", qs.openTime.String())
 	//消费消息队列
 	go qs.Sched()
@@ -200,10 +201,14 @@ func (defaultScheduler *DefaultScheduler) Schedule(task Task) {
 	try(task)
 }
 
+func (defaultScheduler *DefaultScheduler) IsClose() bool {
+	return false
+}
+
 var (
 	chDie   = make(chan struct{})
 	chExit  = make(chan struct{})
-	chTasks = make(chan Task, 1<<8)
+	chTasks = make(chan Task, globalMessageQueuelog)
 	started int32
 	closed  int32
 )

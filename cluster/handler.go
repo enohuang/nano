@@ -121,7 +121,8 @@ type LocalHandler struct {
 	localServices map[string]*component.Service // all registered service
 	localHandlers map[string]*component.Handler // all handler method
 
-	mu             sync.RWMutex
+	mu sync.RWMutex
+	// // TODO  再加一层 NodeId 分组
 	remoteServices map[string][]*clusterpb.MemberInfo
 
 	pipeline    pipeline.Pipeline
@@ -244,11 +245,12 @@ func (h *LocalHandler) handle(conn net.Conn) {
 
 	// guarantee agent related resource be destroyed
 	defer func() {
+		// 移除当前断开的会话
+		h.currentNode.removeSession(agent.session.ID())
 		request := &clusterpb.SessionClosedRequest{
 			SessionId: agent.session.ID(),
 			UId:       agent.session.UID(),
 		}
-
 		members := h.currentNode.cluster.remoteAddrs()
 		for _, remote := range members {
 			log.Println("Notify remote server", remote)
@@ -267,8 +269,8 @@ func (h *LocalHandler) handle(conn net.Conn) {
 				log.Println("Notify remote server success", remote)
 			}
 		}
-
 		agent.Close()
+
 		if env.Debug {
 			log.Println(fmt.Sprintf("Session read goroutine exit, SessionID=%d, UID=%d", agent.session.ID(), agent.session.UID()))
 		}
@@ -384,6 +386,7 @@ func (h *LocalHandler) remoteProcess(session *session.Session, msg *message.Mess
 		if addr, found := session.Router().Find(service); found {
 			remoteAddr = addr
 		} else {
+			// TODO 按照房间号高位 + config.toml 配置的nodeId + 房间号高位 进行rpc 地址分配
 			member := h.currentNode.Options.RemoteServiceRoute(service, session, members)
 			if member == nil {
 				err = fmt.Errorf(fmt.Sprintf("customize remoteServiceRoute handler: %s is not found", msg.Route))
@@ -470,6 +473,8 @@ func (h *LocalHandler) remoteProcess(session *session.Session, msg *message.Mess
 }
 
 func (h *LocalHandler) processMessage(agent *agent, msg *message.Message) {
+
+	fmt.Printf("processMessage, msg.Type[%+v], msg.Rout[%+v] \n", msg.Type, msg.Route)
 	var lastMid uint64
 	switch msg.Type {
 	case message.Request:
@@ -481,7 +486,13 @@ func (h *LocalHandler) processMessage(agent *agent, msg *message.Message) {
 		return
 	}
 
+	for k, _ := range h.localHandlers {
+		fmt.Printf("localHandlers ~ key[%v]\n", k)
+	}
+
 	handler, found := h.localHandlers[msg.Route]
+
+	fmt.Printf("localHandlers ~ found[%v]\n", found)
 	if !found {
 		h.remoteProcess(agent.session, msg, false)
 	} else {

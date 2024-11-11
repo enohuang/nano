@@ -75,6 +75,45 @@ import (
 // AppEnv  为 urfave/cli 方式启动的APP 设置 环境变量
 // urfave/cli is a declarative, simple, fast, and fun package for building command line tools in Go featuring
 func WithAppEnv(c *cli.Context, configType, configName string) {
+
+	flags := []cli.Flag{
+		cli.StringFlag{
+			Name:  "c",
+			Value: "../configs",
+			Usage: "load configuration from `FILE`",
+		},
+		cli.BoolFlag{
+			Name:  "cpuprofile",
+			Usage: "enable cpu profile",
+		},
+		cli.StringFlag{
+			Name:  "host",
+			Value: "",
+			Usage: "host",
+		},
+		cli.IntFlag{
+			Name:  "port",
+			Value: 0,
+			Usage: "port",
+		},
+		cli.IntFlag{
+			Name:  "snowflake_node",
+			Value: 0,
+			Usage: "snowflake_node",
+		},
+		cli.StringFlag{
+			Name:  "client_addr",
+			Value: "",
+			Usage: "client_addr",
+		},
+	}
+
+	if c.App.Flags == nil {
+		c.App.Flags = flags
+	} else {
+		c.App.Flags = append(c.App.Flags, flags...)
+	}
+
 	//调整配置文件读取路径
 	viper.SetConfigType(configType)
 	viper.AddConfigPath(c.String("c"))
@@ -99,20 +138,26 @@ func WithAppEnv(c *cli.Context, configType, configName string) {
 	}
 }
 
-func Startup(components *component.Components, name string, ops ...nano.Option) {
+func Startup(components *component.Components, c *cli.Context, ops ...nano.Option) {
 	//启动节点
 	var options = make([]nano.Option, 0)
 	if !viper.GetBool("cluster.single") {
-		options = option.ClusterOptions(components)
+		options = option.ClusterOptions(components, c)
 	} else {
 		//单节点启动
-		options = option.NodeOptions(components)
+		options = option.NodeOptions(components, c)
 	}
+
 	for _, v := range ops {
 		options = append(options, v)
 	}
-	fmt.Printf("\t\t\t\t\t\t\t\t\t %s SERVICE STARTUP\n", strings.ToUpper(name))
-	addr := fmt.Sprintf("%s:%d", viper.GetString("network.host"), viper.GetInt("network.port"))
+	var host = c.String("host")
+	var port = c.Int("port")
+	addr := fmt.Sprintf("%s:%d", host, port)
+	if len(strings.TrimSpace(host)) == 0 || port == 0 {
+		addr = fmt.Sprintf("%s:%d", viper.GetString("network.host"), viper.GetInt("network.port"))
+	}
+	fmt.Printf("\t\t\t\t\t\t\t\t\t %s SERVICE STARTUP\n", strings.ToUpper(c.App.Name))
 	nano.Listen(addr,
 		options...,
 	)
